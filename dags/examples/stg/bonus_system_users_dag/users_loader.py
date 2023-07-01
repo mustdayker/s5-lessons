@@ -56,7 +56,7 @@ class RankDestRepository:
 
 
 class UserLoader:
-    WF_KEY = "example_ranks_origin_to_stg_workflow"
+    WF_KEY = "example_users_origin_to_stg_workflow"
     LAST_LOADED_ID_KEY = "last_loaded_id"
     BATCH_LIMIT = 25  # Рангов мало, но мы хотим продемонстрировать инкрементальную загрузку рангов.
 
