@@ -1,5 +1,6 @@
 from logging import Logger
 from typing import List
+from datetime import datetime
 
 from examples.stg import EtlSetting, StgEtlSettingsRepository
 from lib import PgConnect
@@ -9,26 +10,28 @@ from psycopg.rows import class_row
 from pydantic import BaseModel
 
 
-class UserObj(BaseModel):
+class EventObj(BaseModel):
     id: int
-    order_user_id: str
+    event_ts: datetime
+    event_type: str
+    event_value: str
 
 
-class UsersOriginRepository:
+class EventsOriginRepository:
     def __init__(self, pg: PgConnect) -> None:
         self._db = pg
 
-    def list_users(self, user_threshold: int, limit: int) -> List[UserObj]:
-        with self._db.client().cursor(row_factory=class_row(UserObj)) as cur:
+    def list_events(self, event_threshold: int, limit: int) -> List[EventObj]:
+        with self._db.client().cursor(row_factory=class_row(EventObj)) as cur:
             cur.execute(
                 """
-                    SELECT id, order_user_id
-                    FROM users
+                    SELECT id, event_ts, event_type, event_value
+                    FROM outbox
                     WHERE id > %(threshold)s --Пропускаем те объекты, которые уже загрузили.
                     ORDER BY id ASC --Обязательна сортировка по id, т.к. id используем в качестве курсора.
                     LIMIT %(limit)s; --Обрабатываем только одну пачку объектов.
                 """, {
-                    "threshold": user_threshold,
+                    "threshold": event_threshold,
                     "limit": limit
                 }
             )
@@ -36,38 +39,42 @@ class UsersOriginRepository:
         return objs
 
 
-class UserDestRepository:
+class EventDestRepository:
 
-    def insert_user(self, conn: Connection, user: UserObj) -> None:
+    def insert_event(self, conn: Connection, event: EventObj) -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                    INSERT INTO stg.bonussystem_users(id, order_user_id)
-                    VALUES (%(id)s, %(order_user_id)s)
+                    INSERT INTO stg.bonussystem_events(id, event_ts, event_type, event_value)
+                    VALUES (%(id)s, %(event_ts)s, %(event_type)s, %(event_value)s)
                     ON CONFLICT (id) DO UPDATE
                     SET
-                        order_user_id = EXCLUDED.order_user_id;
+                        event_ts = EXCLUDED.event_ts,
+                        event_type = EXCLUDED.event_type,
+                        event_value = EXCLUDED.event_value;
                 """,
                 {
-                    "id": user.id,
-                    "order_user_id": user.order_user_id
+                    "id": event.id,
+                    "event_ts": event.event_ts,
+                    "event_type": event.event_type,
+                    "event_value": event.event_value
                 },
             )
 
 
-class UserLoader:
-    WF_KEY = "example_users_origin_to_stg_workflow"
+class EventLoader:
+    WF_KEY = "example_events_origin_to_stg_workflow"
     LAST_LOADED_ID_KEY = "last_loaded_id"
-    BATCH_LIMIT = 50  # Рангов мало, но мы хотим продемонстрировать инкрементальную загрузку рангов.
+    BATCH_LIMIT = 10000  # Рангов мало, но мы хотим продемонстрировать инкрементальную загрузку рангов.
 
     def __init__(self, pg_origin: PgConnect, pg_dest: PgConnect, log: Logger) -> None:
         self.pg_dest = pg_dest
-        self.origin = UsersOriginRepository(pg_origin)
-        self.stg = UserDestRepository()
+        self.origin = EventsOriginRepository(pg_origin)
+        self.stg = EventDestRepository()
         self.settings_repository = StgEtlSettingsRepository()
         self.log = log
 
-    def load_users(self):
+    def load_events(self):
         # открываем транзакцию.
         # Транзакция будет закоммичена, если код в блоке with пройдет успешно (т.е. без ошибок).
         # Если возникнет ошибка, произойдет откат изменений (rollback транзакции).
@@ -81,15 +88,15 @@ class UserLoader:
 
             # Вычитываем очередную пачку объектов.
             last_loaded = wf_setting.workflow_settings[self.LAST_LOADED_ID_KEY]
-            load_queue = self.origin.list_users(last_loaded, self.BATCH_LIMIT)
-            self.log.info(f"Found {len(load_queue)} users to load.")
+            load_queue = self.origin.list_events(last_loaded, self.BATCH_LIMIT)
+            self.log.info(f"Found {len(load_queue)} events to load.")
             if not load_queue:
                 self.log.info("Quitting.")
                 return
 
             # Сохраняем объекты в базу dwh.
-            for user in load_queue:
-                self.stg.insert_user(conn, user)
+            for event in load_queue:
+                self.stg.insert_event(conn, event)
 
             # Сохраняем прогресс.
             # Мы пользуемся тем же connection, поэтому настройка сохранится вместе с объектами,
