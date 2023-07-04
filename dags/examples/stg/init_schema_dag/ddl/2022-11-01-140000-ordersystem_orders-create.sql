@@ -1,7 +1,6 @@
 CREATE TABLE IF NOT EXISTS stg.ordersystem_orders(
-    id           serial       NOT NULL,
-    object_id    varchar(512) NOT NULL,
-    object_value TEXT         NOT NULL,
-    update_ts    timestamp    NOT NULL,
-    CONSTRAINT ordersystem_orders_pkey PRIMARY KEY (id)
+    id           int       NOT NULL PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    object_id    varchar   NOT NULL UNIQUE,
+    object_value text      NOT NULL,
+    update_ts    timestamp NOT NULL
 );
