@@ -18,44 +18,29 @@ def read_data_from_stg():
     pg_hook = PostgresHook(postgres_conn_id=PG_CONN_ID)
     connection = pg_hook.get_conn()
     cursor = connection.cursor()
- 
-    # Чтение данных из stg.bonussystem_user и stg.ordersystem_users
-    cursor.execute("SELECT object_value FROM stg.ordersystem_restaurants")
-                                                            
-    result = cursor.fetchall()
-    connection.close()
     
-    temp_list = []
+    query = """
+    INSERT INTO dds.dm_products (restaurant_id, product_id, product_name, product_price, active_from, active_to)
+    SELECT 
+        id AS restaurant_id,
+        (json_array_elements((object_value::json->>'menu')::json)::json->>'_id')::varchar AS product_id,
+        (json_array_elements((object_value::json->>'menu')::json)::json->>'name')::text   AS product_name,
+        (json_array_elements((object_value::json->>'menu')::json)::json->>'price')::numeric(14,2) AS product_price,
+        (object_value::json->>'update_ts')::timestamp AS active_from,
+        ('2099-12-31 00:00:00.000')::timestamp        AS active_to
+    FROM stg.ordersystem_restaurants AS or2
+    ORDER BY restaurant_id;
+    """
+    cursor.execute(query)
 
-    for i in result:
-        j = json.loads(i[0])
-        temp_list.append(j)
-
-    df = pd.DataFrame(temp_list)
-    df = df.drop(columns=['menu'])
-    df['active_to'] = '2099-12-31 00:00:00.000'
-
-    print(df.columns)
-    print(df)
-
-    connection = pg_hook.get_conn()
-    cursor = connection.cursor()
- 
-    # Запись данных в базу
-    
-    insert_stmt = f"INSERT INTO dds.dm_restaurants (restaurant_id, restaurant_name, active_from, active_to) VALUES (%s, %s, %s, %s)"
-
-    cursor.executemany(insert_stmt, df.values)
     connection.commit()
     connection.close()
 
-
-
-    return result
+    return 300
 
 # Создание DAG
 with DAG(
-    "stg_to_dds_restaurants_dag", 
+    "stg_to_dds_products_dag", 
     start_date=datetime(2021, 10, 1), 
     schedule_interval=None
     ) as dag:

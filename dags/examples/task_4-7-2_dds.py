@@ -76,7 +76,7 @@ def read_data_from_stg():
 with DAG(
     "stg_to_dds_users_dag", 
     start_date=datetime(2021, 10, 1), 
-    schedule_interval="@once"
+    schedule_interval=None
     ) as dag:
  
     read_data = PythonOperator(
