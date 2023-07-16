@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS cdm.dm_courier_ledger (
 	courier_order_sum    numeric(14,2),
 	courier_tips_sum     numeric(14,2),
 	courier_reward_sum   numeric(14,2),
+	-- для исключения дублей добавляем ограничения на 3 поля сразу
 	CONSTRAINT unique_constraint UNIQUE (courier_id, settlement_year, settlement_month)
 );
 

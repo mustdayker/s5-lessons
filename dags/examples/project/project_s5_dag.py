@@ -15,9 +15,6 @@ from datetime import datetime, timedelta
 from psycopg2.extras import execute_values
 
 
-ddl_path = Variable.get("EXAMPLE_STG_DDL_FILES_PATH")
-
- 
 # Параметры подключения к БД Postgres
 PG_CONN_ID = "PG_WAREHOUSE_CONNECTION"
 
@@ -34,6 +31,7 @@ headers = {
 
 
 # __________________________________ Курьеры ____________________________________
+# Функция забирает данные о курьерах по API
 
 def get_couriers(): 
     
@@ -44,23 +42,27 @@ def get_couriers():
     limit = 10
     offset = 0
     
+    # Запускаем бесконечный цикл, который перебирает данные из источника по {limit} строк, пока они не закончатся
     while True:
         # conn = psycopg2.connect("host='localhost' port='15432' dbname='de' user='jovyan' password='jovyan'")
         pg_hook = PostgresHook(postgres_conn_id=PG_CONN_ID)
         conn = pg_hook.get_conn()
         cur = conn.cursor()
 
+        # Необходимые параметры упаковываем в переменную
         get_couriers_var = f'/couriers?sort_field={sort_field}&sort_direction={sort_direction}&limit={limit}&offset={offset}'
         
         response = requests.get(f'{base_url}{get_couriers_var}', headers=headers) 
         couriers = response.json() 
         
+        # Если даные в истонички закончилсиь выходим из цикла
         if len(couriers) == 0:
             conn.commit()
             cur.close()
             conn.close()
             break
 
+        
         sql_script = """
         INSERT INTO stg.st_couriers(courier_id, courier_name)
         VALUES (%(courier_id)s, %(courier_name)s)
@@ -68,6 +70,8 @@ def get_couriers():
         SET courier_name = EXCLUDED.courier_name
         ;
         """
+        
+        # Циклом перебираем все элементы из полученного массива и рассовываем их по нужным полям
         for i in range(len(couriers)):
             values_dict = {
                     "courier_id": couriers[i]["_id"],
@@ -83,6 +87,7 @@ def get_couriers():
 
 
 # __________________________________ Доставки ____________________________________
+# Функция забирает данные о доставках по API
 
 def get_deliveries(): 
     
@@ -96,6 +101,8 @@ def get_deliveries():
 
     today = datetime.today()
     r_today = datetime(today.year, today.month, today.day)
+    
+    # Забираем данные за последние 7 дней
     date_from = r_today - timedelta(days=7)
     date_to = r_today - timedelta(days=1)
 
@@ -130,7 +137,7 @@ def get_deliveries():
             values_dict = {
                     "delivery_ts": deliveries[i]["delivery_ts"],
                     "delivery_id": deliveries[i]["delivery_id"],
-                    "object_value": json.dumps(deliveries[i])
+                    "object_value": json.dumps(deliveries[i]) # Упаковываем строковые данные в JSON
                     }
 
             cur.execute(sql_script, values_dict)
@@ -146,29 +153,51 @@ with DAG(
     start_date=datetime(2021, 10, 1), 
     schedule_interval=None
     ) as dag:
- 
+    
+    # Таска забирает данные о курьерах по API 
+    # и кладет их в stg.st_couriers (courier_id, courier_name)
     get_courier = PythonOperator(
         task_id="get_couriers",
         python_callable=get_couriers
     )
 
+    # Таска забирает данные о достиавках по API 
+    # и кладет их в stg.st_delivers (delivery_ts, delivery_id, object_value)
     get_deliver = PythonOperator(
         task_id="get_deliveries",
         python_callable=get_deliveries
     )
 
+    # Таска заполняет таблицу dds.dm_couriers (courier_id, courier_name)
+    # из таблицы              stg.st_couriers (courier_id, courier_name)
     dds_couriers = PostgresOperator(
         task_id='fill_dds_couriers',
         postgres_conn_id=PG_CONN_ID,
         sql="sql_scripts/fill_dds_couriers_script.sql"
     )
 
+    # Таска заполняет таблицу dds.dm_delivers (order_id, order_ts, delivery_id, courier_id, address, delivery_ts, rate, "sum", tip_sum)
+    # из таблицы              stg.st_delivers (delivery_ts, delivery_id, object_value)  
     dds_delivers = PostgresOperator(
         task_id='fill_dds_delivers',
         postgres_conn_id=PG_CONN_ID,
         sql="sql_scripts/fill_dds_delivers_script.sql"
     )
     
+    # Таска заполняет витрину cdm.dm_courier_ledger (
+    # 	courier_id,
+    # 	courier_name,
+    # 	settlement_year,
+    # 	settlement_month,
+    # 	orders_count,
+    # 	orders_total_sum,
+    # 	rate_avg,
+    # 	order_processing_fee,
+    # 	courier_order_sum,
+    # 	courier_tips_sum,
+    # 	courier_reward_sum
+    # )
+    # Используя данные из dds.dm_couriers и dds.dm_delivers
     cdm_couriers = PostgresOperator(
         task_id='fill_cdm_couriers',
         postgres_conn_id=PG_CONN_ID,
