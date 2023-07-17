@@ -89,7 +89,7 @@ def get_couriers():
 # __________________________________ Доставки ____________________________________
 # Функция забирает данные о доставках по API
 
-def get_deliveries(): 
+def get_deliveries(ds): 
     
     print('\n __________ GET deliveries _______________')
     
@@ -98,13 +98,23 @@ def get_deliveries():
     limit = 50
     offset = 0
     
-
-    today = datetime.today()
-    r_today = datetime(today.year, today.month, today.day)
     
-    # Забираем данные за последние 7 дней
-    date_from = r_today - timedelta(days=7)
-    date_to = r_today - timedelta(days=1)
+    
+    # Забираем данные за последние 7 дней / Реализация внутри функции
+    # today = datetime.today()
+    # r_today = datetime(today.year, today.month, today.day)
+    
+    # date_from = r_today - timedelta(days=7)
+    # date_to = r_today - timedelta(days=1)
+
+    # Реализация с помощью контекста DAG
+    print("Дата запуска:", ds)
+
+    run_day = datetime.strptime(ds, "%Y-%m-%d")
+
+    date_from = run_day - timedelta(days=1)
+    date_to = run_day
+
 
     while True:
         # conn = psycopg2.connect("host='localhost' port='15432' dbname='de' user='jovyan' password='jovyan'")
@@ -149,9 +159,10 @@ def get_deliveries():
 
 
 with DAG(
-    "project_s5", 
-    start_date=datetime(2021, 10, 1), 
-    schedule_interval=None
+    "project_s5_v1", 
+    start_date=datetime(2023, 7, 10), 
+    schedule_interval='@daily',
+    catchup=True
     ) as dag:
     
     # Таска забирает данные о курьерах по API 

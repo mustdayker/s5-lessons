@@ -20,8 +20,6 @@ SELECT
     (object_value::JSON->>'sum')::numeric(14,2)     AS "sum",
     (object_value::JSON->>'tip_sum')::numeric(14,2) AS tip_sum
 FROM stg.st_delivers
-WHERE   delivery_ts >= '{{ds}}'::date - INTERVAL '1 day'
-    AND delivery_ts <= '{{ds}}'::date
 ON CONFLICT (delivery_id) DO UPDATE
 SET
     order_id    = EXCLUDED.order_id,
